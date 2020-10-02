@@ -80,6 +80,15 @@ void scan(int *array, int n)
 	free(lastitem);
 }
 
+void Transpose(VALUE_TYPE *A, int m, int n, VALUE_TYPE *AT)
+{
+	for (int i = 0; i < m; i++)
+		for (int j = 0; j < n; j++)
+		{
+			AT[j * m + i] = A[i * n + j];
+		}
+}
+
 void printvec(int *array, int length)
 {
 	for (int i = 0; i < length; i++)
@@ -104,19 +113,16 @@ void DenseToCSR(VALUE_TYPE *C, int m, int n, SMatrix *W)
 
 	//to scan
 	scan(W->rowpointer, (m + 1));
-
+	//printf("scan over\n");
 	W->columnindex = (int *)malloc(sizeof(int) * (W->rowpointer[m]));
-	W->value = (VALUE_TYPE *)malloc(sizeof(W->rowpointer[m]));
+	W->value = (VALUE_TYPE *)malloc(sizeof(VALUE_TYPE) * W->rowpointer[m]);
 	int pos = 0;
+	int nnz = 0;
 	for (int i = 0; i < m; i++)
 	{
-		int nnz = 0;
-		if (nnz == W->rowpointer[i + 1])
-		{
-			continue;
-		}
 		for (int j = 0; j < n; j++)
 		{
+
 			if (C[i * n + j] != 0)
 			{
 				W->columnindex[pos] = j;
@@ -124,8 +130,13 @@ void DenseToCSR(VALUE_TYPE *C, int m, int n, SMatrix *W)
 				pos++;
 				nnz++;
 			}
+			if (nnz == W->rowpointer[i + 1])
+			{
+				break;
+			}
 		}
 	}
+	//printf("trans over");
 }
 
 int main(int argc, char **argv)
@@ -162,24 +173,10 @@ int main(int argc, char **argv)
 	mmio_data(A.rowpointer, A.columnindex, A.value, filename1);
 	printf("input matrix A: ( %i, %i ) nnz = %i\n", mA, nA, nnzA);
 	VALUE_TYPE *A0 = (VALUE_TYPE *)malloc(mA * nA * sizeof(VALUE_TYPE));
-	memset(A0, 0, sizeof(VALUE_TYPE) * mA * nA);
-	for (int i = 0; i < mA; i++)
-	{
-		for (int j = A.rowpointer[i]; j < A.rowpointer[i + 1]; j++)
-		{
-			A0[i * nA + A.columnindex[j]] = A.value[j];
-		}
-	}
-	free(A.rowpointer);
-	free(A.columnindex);
-	free(A.value);
-
 	char neuronfile1[] = "neuron1024/n1024-l";
 	char neuronfile2[] = ".tsv";
 	char filename3[60];
 
-	VALUE_TYPE *B0[120];
-#pragma omp parallel for schedule(dynamic)
 	for (int k = 0; k < 120; k++)
 	{
 		char filenum[5];
@@ -195,21 +192,8 @@ int main(int argc, char **argv)
 		B[k].columnindex = (int *)malloc((nnzB) * sizeof(int));
 		B[k].rowpointer = (int *)malloc((mB + 1) * sizeof(int));
 		mmio_data(B[k].rowpointer, B[k].columnindex, B[k].value, filename3);
-
-		B0[k] = (VALUE_TYPE *)malloc(mB * nB * sizeof(VALUE_TYPE));
-		memset(B0[k], 0, sizeof(VALUE_TYPE) * mB * nB);
-		for (int i = 0; i < mB; i++)
-		{
-			for (int j = B[k].rowpointer[i]; j < B[k].rowpointer[i + 1]; j++)
-			{
-				B0[k][i * nB + B[k].columnindex[j]] = B[k].value[j];
-			}
-		}
-
-		free(B[k].rowpointer);
-		free(B[k].columnindex);
-		free(B[k].value);
 	}
+
 	gettimeofday(&t4, NULL);
 	double time_load = (t4.tv_sec - t3.tv_sec) * 1000.0 + (t4.tv_usec - t3.tv_usec) / 1000.0;
 	printf("Weight matrix load time: %f ms \n", time_load);
@@ -232,12 +216,16 @@ int main(int argc, char **argv)
 
 		gettimeofday(&t1, NULL);
 #pragma omp parallel for schedule(dynamic)
-		for (int mi = 0; mi < mC; mi++)
+		//csr * csr = Dense(C)
+		for (int i = 0; i < mA; i++)
 		{
-			for (int ni = 0; ni < nC; ni++)
+			for (int j = A.rowpointer[i]; j < A.rowpointer[i + 1]; j++)
 			{
-				for (int ki = 0; ki < nA; ki++)
-					C0[mi * nB + ni] += A0[mi * nA + ki] * B0[k][ki * nB + ni];
+				// ith row , A.columnidex[j] col
+				for (int B_row = B[k].rowpointer[A.columnindex[j]]; B_row < B[k].rowpointer[A.columnindex[j] + 1]; B_row++)
+				{
+					C0[i * nC + B[k].columnindex[B_row]] += A.value[j] * B[k].value[B_row];
+				}
 			}
 		}
 		gettimeofday(&t2, NULL);
@@ -258,14 +246,19 @@ int main(int argc, char **argv)
 				C0[i] = 32;
 			}
 		}
+		if (k != 119)
+		{
+			free(A.rowpointer);
+			free(A.columnindex);
+			free(A.value);
+			DenseToCSR(C0, mC, nC, &A);
+		}
+		else
+			memcpy(A0, C0, (mC * nC) * sizeof(VALUE_TYPE));
 		gettimeofday(&t2, NULL);
 		double time_biasrelu = (t2.tv_sec - t1.tv_sec) * 1000.0 + (t2.tv_usec - t1.tv_usec) / 1000.0;
-		printf("k = %d, GEMM time: %4.5f ms, Bias+ReLU time: %4.5f ms\n",
+		printf("k = %d, GEMM time: %4.5f ms, Bias+ReLU+Trans time: %4.5f ms\n",
 			   k + 1, time_gemm, time_biasrelu);
-
-		free(B0[k]);
-
-		memcpy(A0, C0, (mC * nC) * sizeof(VALUE_TYPE));
 	}
 
 	gettimeofday(&t4, NULL);
@@ -275,6 +268,7 @@ int main(int argc, char **argv)
 	free(C0);
 
 	// check results
+
 	printf("test\n");
 	FILE *fs;
 	fs = fopen("sparse-images-1024-1.tsv", "w+");
@@ -344,13 +338,9 @@ int main(int argc, char **argv)
 		printf("CHALLENGE FAILED\n");
 	}
 
+	free(A.rowpointer);
+	free(A.columnindex);
+	free(A.value);
 	free(A0);
-
-	/*VALUE_TYPE test[] = {0, 0, 2, 3.2, 0, 0, 0, 0, 0};
-	SMatrix *ans = (SMatrix *)malloc(sizeof(SMatrix));
-	DenseToCSR(test, 3, 3, ans);
-	printvec(ans->rowpointer, 4);
-	printvec(ans->columnindex, ans->rowpointer[3]);
-*/
 	return 0;
 }
