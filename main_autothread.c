@@ -6,6 +6,7 @@
 #include "mmiohighlevel.h"
 #include <omp.h>
 #include <math.h>
+#include <immintrin.h>
 typedef struct
 {
 	VALUE_TYPE *value;
@@ -16,12 +17,12 @@ typedef struct
 
 void scan(int *array, int n)
 {
-		int nthreads = omp_get_max_threads();
+	int nthreads = omp_get_max_threads();
 	int *lastitem = (int *)malloc(sizeof(int) * nthreads);
 	memset(lastitem, 0, sizeof(int) * nthreads);
 
 	int np = ceil((double)n / (double)nthreads);
-#pragma omp parallel for 
+#pragma omp parallel for
 	for (int tid = 0; tid < nthreads; tid++)
 	{
 		int start = tid * np;
@@ -60,7 +61,7 @@ void scan(int *array, int n)
 		old = new;
 	}
 
-#pragma omp parallel for 
+#pragma omp parallel for
 	for (int tid = 0; tid < nthreads; tid++)
 	{
 		int start = tid * np;
@@ -147,7 +148,7 @@ int main(int argc, char **argv)
 	int *tc1;
 	int *tc2;
 	double bias = -0.3000;
-	printf("========= threads num : %d ==========\n",omp_get_max_threads());
+	printf("========= threads num : %d ==========\n", omp_get_max_threads());
 	int mA;
 	int nA;
 	int nnzA;
@@ -201,21 +202,26 @@ int main(int argc, char **argv)
 	mC = mA;
 	nC = nB;
 	VALUE_TYPE *C0 = (VALUE_TYPE *)malloc((mC * nC) * sizeof(VALUE_TYPE));
-
+	double time_trans;
 	gettimeofday(&t3, NULL);
 	for (int k = 0; k < 120; k++)
 	{
 		int k1 = k + 1;
 		//memset(C0, 0, sizeof(VALUE_TYPE) * mC * nC);
 		int NC = mC * nC;
-#pragma omp parallel for 
+/*#pragma omp parallel for
 		for (int i = 0; i < NC; i++)
 		{
 			C0[i] = 0;
+		}*/
+		__m256 v = _mm256_setzero_ps();
+		#pragma omp parallel for
+		for(int i = 0 ; i< NC ; i+=8){
+			_mm256_storeu_ps(&C0[i],v);
 		}
 
 		gettimeofday(&t1, NULL);
-#pragma omp parallel for schedule(dynamic) 
+#pragma omp parallel for schedule(dynamic)
 		//csr * csr = Dense(C)
 		for (int i = 0; i < mA; i++)
 		{
@@ -253,7 +259,7 @@ int main(int argc, char **argv)
 			}
 			for (int i = start; i < end; i++)
 			{
-				C0[i] += bias;
+				C0[i] += bias; //bias = -0.3
 				if (C0[i] <= 0)
 				{
 					C0[i] = 0;
@@ -264,19 +270,24 @@ int main(int argc, char **argv)
 				}
 			}
 		}
+		gettimeofday(&t2, NULL);
+		double time_biasrelu = (t2.tv_sec - t1.tv_sec) * 1000.0 + (t2.tv_usec - t1.tv_usec) / 1000.0;
 		if (k != 119)
 		{
 			free(A.rowpointer);
 			free(A.columnindex);
 			free(A.value);
+
+			gettimeofday(&t1, NULL);
 			DenseToCSR(C0, mC, nC, &A);
+			gettimeofday(&t2, NULL);
+			time_trans = (t2.tv_sec - t1.tv_sec) * 1000.0 + (t2.tv_usec - t1.tv_usec) / 1000.0;
 		}
 		else
 			memcpy(A0, C0, (mC * nC) * sizeof(VALUE_TYPE));
-		gettimeofday(&t2, NULL);
-		double time_biasrelu = (t2.tv_sec - t1.tv_sec) * 1000.0 + (t2.tv_usec - t1.tv_usec) / 1000.0;
-		printf("k = %d, GEMM time: %4.5f ms, Bias+ReLU+Trans time: %4.5f ms\n",
-			   k + 1, time_gemm, time_biasrelu);
+
+		printf("k = %d, GEMM time: %4.5f ms, Bias+ReLU time: %4.5f ms,Trans time: %4.5fms\n",
+			   k + 1, time_gemm, time_biasrelu, time_trans);
 	}
 
 	gettimeofday(&t4, NULL);
