@@ -13,10 +13,10 @@ typedef struct
 	int *rowpointer;
 
 } SMatrix;
-int nthreads;
+
 void scan(int *array, int n)
 {
-	//	int nthreads = omp_get_max_threads();
+		int nthreads = omp_get_max_threads();
 	int *lastitem = (int *)malloc(sizeof(int) * nthreads);
 	memset(lastitem, 0, sizeof(int) * nthreads);
 
@@ -147,8 +147,7 @@ int main(int argc, char **argv)
 	int *tc1;
 	int *tc2;
 	double bias = -0.3000;
-	nthreads = atoi(argv[1]);
-	printf("========= threads num : %d ==========\n",nthreads);
+	printf("========= threads num : %d ==========\n",omp_get_max_threads());
 	int mA;
 	int nA;
 	int nnzA;
@@ -209,14 +208,14 @@ int main(int argc, char **argv)
 		int k1 = k + 1;
 		//memset(C0, 0, sizeof(VALUE_TYPE) * mC * nC);
 		int NC = mC * nC;
-#pragma omp parallel for num_threads(nthreads)
+#pragma omp parallel for 
 		for (int i = 0; i < NC; i++)
 		{
 			C0[i] = 0;
 		}
 
 		gettimeofday(&t1, NULL);
-#pragma omp parallel for schedule(dynamic) num_threads(nthreads)
+#pragma omp parallel for schedule(dynamic) 
 		//csr * csr = Dense(C)
 		for (int i = 0; i < mA; i++)
 		{
@@ -238,7 +237,7 @@ int main(int argc, char **argv)
 
 		gettimeofday(&t1, NULL);
 
-		//	int nthreads = omp_get_max_threads();
+		int nthreads = omp_get_max_threads();
 		int n = mC * nC;
 		int np = ceil((double)n / (double)nthreads);
 #pragma omp parallel for
@@ -276,8 +275,8 @@ int main(int argc, char **argv)
 			memcpy(A0, C0, (mC * nC) * sizeof(VALUE_TYPE));
 		gettimeofday(&t2, NULL);
 		double time_biasrelu = (t2.tv_sec - t1.tv_sec) * 1000.0 + (t2.tv_usec - t1.tv_usec) / 1000.0;
-	//	printf("k = %d, GEMM time: %4.5f ms, Bias+ReLU+Trans time: %4.5f ms\n",
-//			   k + 1, time_gemm, time_biasrelu);
+		printf("k = %d, GEMM time: %4.5f ms, Bias+ReLU+Trans time: %4.5f ms\n",
+			   k + 1, time_gemm, time_biasrelu);
 	}
 
 	gettimeofday(&t4, NULL);
