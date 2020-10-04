@@ -117,23 +117,20 @@ void DenseToCSR(VALUE_TYPE *C, int m, int n, SMatrix *W)
 	//printf("scan over\n");
 	W->columnindex = (int *)malloc(sizeof(int) * (W->rowpointer[m]));
 	W->value = (VALUE_TYPE *)malloc(sizeof(VALUE_TYPE) * W->rowpointer[m]);
-	int pos = 0;
-	int nnz = 0;
+#pragma omp parallel for schedule(dynamic)
 	for (int i = 0; i < m; i++)
 	{
+		int start = W->rowpointer[i];
+		int end = W->rowpointer[i + 1];
 		for (int j = 0; j < n; j++)
 		{
-
+			if (start == end)
+				break;
 			if (C[i * n + j] != 0)
 			{
-				W->columnindex[pos] = j;
-				W->value[pos] = C[i * n + j];
-				pos++;
-				nnz++;
-			}
-			if (nnz == W->rowpointer[i + 1])
-			{
-				break;
+				W->columnindex[start] = j;
+				W->value[start] = C[i * n + j];
+				start++;
 			}
 		}
 	}
@@ -209,15 +206,16 @@ int main(int argc, char **argv)
 		int k1 = k + 1;
 		//memset(C0, 0, sizeof(VALUE_TYPE) * mC * nC);
 		int NC = mC * nC;
-/*#pragma omp parallel for
+		/*#pragma omp parallel for
 		for (int i = 0; i < NC; i++)
 		{
 			C0[i] = 0;
 		}*/
 		__m256 v = _mm256_setzero_ps();
-		#pragma omp parallel for
-		for(int i = 0 ; i< NC ; i+=8){
-			_mm256_storeu_ps(&C0[i],v);
+#pragma omp parallel for
+		for (int i = 0; i < NC; i += 8)
+		{
+			_mm256_storeu_ps(&C0[i], v);
 		}
 
 		gettimeofday(&t1, NULL);
